@@ -1,0 +1,12 @@
+diff --git a/kernel/seccomp_cache.h b/kernel/seccomp_cache.h
+index e3c1a31d..fd7c5a10 100644
+--- a/kernel/seccomp_cache.h
++++ b/kernel/seccomp_cache.h
+@@ -1,5 +1,5 @@
+-#ifndef __KSU_H_KERNEL_COMPAT
+-#define __KSU_H_KERNEL_COMPAT
++#ifndef __KSU_SECCOMP_CACHE_H
++#define __KSU_SECCOMP_CACHE_H
+ 
+ #include <linux/fs.h>
+ #include <linux/version.h>
