@@ -466,18 +466,6 @@ index af0ddbd1..709ba758 100644
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
  #endif
-diff --git a/kernel/seccomp_cache.h b/kernel/seccomp_cache.h
-index e3c1a31d..fd7c5a10 100644
---- a/kernel/seccomp_cache.h
-+++ b/kernel/seccomp_cache.h
-@@ -1,5 +1,5 @@
--#ifndef __KSU_H_KERNEL_COMPAT
--#define __KSU_H_KERNEL_COMPAT
-+#ifndef __KSU_SECCOMP_CACHE_H
-+#define __KSU_SECCOMP_CACHE_H
- 
- #include <linux/fs.h>
- #include <linux/version.h>
 diff --git a/kernel/selinux/rules.c b/kernel/selinux/rules.c
 index 7f99b50e..ce43b71a 100644
 --- a/kernel/selinux/rules.c
@@ -805,7 +793,7 @@ index 69a47bbe..08151567 100644
 \ No newline at end of file
 +}
 diff --git a/kernel/sucompat.c b/kernel/sucompat.c
-index d4c09b53..952d001b 100644
+index 9965725f..bb3734e5 100644
 --- a/kernel/sucompat.c
 +++ b/kernel/sucompat.c
 @@ -20,6 +20,12 @@
@@ -829,7 +817,7 @@ index d4c09b53..952d001b 100644
  int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
  		int *mode, int *__unused_flags)
  {
-@@ -182,7 +189,125 @@ int ksu_handle_execve_sucompat(const char __user **filename_user,
+@@ -182,7 +189,149 @@ int ksu_handle_execve_sucompat(const char __user **filename_user,
  
  	return 0;
  }
@@ -949,20 +937,54 @@ index d4c09b53..952d001b 100644
 +}
 +#endif // #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 +
++int ksu_handle_devpts(struct inode *inode)
++{
++	if (!current->mm) {
++		return 0;
++	}
++
++	uid_t uid = current_uid().val;
++	if (uid % 100000 < 10000) {
++		// not untrusted_app, ignore it
++		return 0;
++	}
++
++	if (!__ksu_is_allow_uid_for_current(uid))
++		return 0;
++
++	if (ksu_file_sid) {
++		struct inode_security_struct *sec = selinux_inode(inode);
++		if (sec) {
++			sec->sid = ksu_file_sid;
++		}
++	}
++
++	return 0;
++}
 +#endif // #ifndef CONFIG_KSU_SUSFS
 +
 +#ifndef CONFIG_KSU_SUSFS
  int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
  				 void *__never_use_argv, void *__never_use_envp,
  				 int *__never_use_flags)
-@@ -208,6 +333,7 @@ int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
+@@ -211,7 +360,9 @@ int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
  
  	return 0;
  }
 +#endif
  
++#ifndef CONFIG_KSU_SUSFS
  int __ksu_handle_devpts(struct inode *inode)
  {
+ #ifndef KSU_KPROBES_HOOK
+@@ -248,6 +399,7 @@ int __maybe_unused ksu_handle_devpts(struct inode *inode)
+ {
+ 	return __ksu_handle_devpts(inode);
+ }
++#endif
+ 
+ // sucompat: permitted process can execute 'su' to gain root access.
+ void ksu_sucompat_init()
 diff --git a/kernel/sucompat.h b/kernel/sucompat.h
 index 1999af84..61b13376 100644
 --- a/kernel/sucompat.h
