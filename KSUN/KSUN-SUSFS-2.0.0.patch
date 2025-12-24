@@ -305,108 +305,10 @@ index 7742dad6..7a6baaa2 100644
  	ksu_supercalls_exit();
  
 diff --git a/kernel/ksud.c b/kernel/ksud.c
-index c5849f90..597e65ac 100644
+index c5849f90..13a44013 100644
 --- a/kernel/ksud.c
 +++ b/kernel/ksud.c
-@@ -23,12 +23,23 @@
- #include <linux/uaccess.h>
- #include <linux/namei.h>
- #include <linux/workqueue.h>
-+
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
- #include <linux/sched/signal.h>
- #else
- #include <linux/sched.h>
- #endif
- 
-+#ifdef CONFIG_TRACEPOINTS
-+#include <linux/tracepoint.h>
-+#include <trace/events/sched.h>
-+#include <linux/module.h>
-+#endif // CONFIG_TRACEPOINTS
-+#include <linux/init.h>
-+#include <linux/string.h>
-+#include <linux/atomic.h>
-+#include <linux/rcupdate.h>
-+
- #include "manager.h"
- #include "allowlist.h"
- #include "arch.h"
-@@ -39,6 +50,73 @@
- #include "throne_tracker.h"
- #include "kernel_compat.h"
- 
-+#ifdef CONFIG_TRACEPOINTS
-+// one-shot (atomic (avoids race(s) across CPUs))
-+static atomic_t ksud_root_done = ATOMIC_INIT(0);
-+
-+// callback_head (static; lifetime for task_work_add)
-+static struct callback_head ksud_cb = { .func = NULL };
-+
-+// task_work callback (root grant after staged boot)
-+static void ksud_post_fs_data_cb(struct callback_head *cb)
-+{
-+	on_post_fs_data();
-+}
-+
-+// exec callback (tracepoint)
-+static void ksud_exec_trace(void *ignore,
-+			    struct task_struct *p,
-+			    pid_t old_pid,
-+			    struct linux_binprm *bprm)
-+{
-+	struct task_struct *init_task;
-+
-+	// validate
-+	if (!bprm || !bprm->filename)
-+		return;
-+
-+	// trigger (first app_process / zygote)
-+	const char *base = strrchr(bprm->filename, '/');
-+	base = base ? base + 1 : bprm->filename;
-+	if (!strcmp(base, "app_process") || !strcmp(base, "app_process64") ||
-+		!strcmp(base, "zygote") || !strcmp(base, "zygote64")) {
-+
-+		// one-shot claim (exit if another (CPU) did)
-+		if (atomic_cmpxchg(&ksud_root_done, 0, 1) != 0)
-+			return;
-+
-+		pr_debug("KernelSU: trace exec %s pid=%d (schedule)\n",
-+				bprm->filename, p->pid);
-+
-+		rcu_read_lock();
-+		init_task = rcu_dereference(p->real_parent);
-+		if (init_task) {
-+			ksud_cb.func = ksud_post_fs_data_cb;
-+			task_work_add(init_task, &ksud_cb, TWA_RESUME);
-+		}
-+		rcu_read_unlock();
-+	}
-+}
-+
-+// register (late init (tracepoint)) / cleanup (module exit)
-+static int __init ksud_tracepoint_init(void)
-+{
-+	register_trace_sched_process_exec(ksud_exec_trace, NULL);
-+	return 0;
-+}
-+
-+// unregister; synchro. rcu (in-flight)
-+static void __exit ksud_tracepoint_exit(void)
-+{
-+	unregister_trace_sched_process_exec(ksud_exec_trace, NULL);
-+	synchronize_rcu();
-+}
-+
-+// Note: built-in stays registered (Android didn't like it)
-+late_initcall(ksud_tracepoint_init);
-+module_exit(ksud_tracepoint_exit);
-+#endif // CONFIG_TRACEPOINTS
-+
- bool ksu_module_mounted __read_mostly = false;
- bool ksu_boot_completed __read_mostly = false;
- 
-@@ -69,7 +147,7 @@ static void stop_vfs_read_hook();
+@@ -69,7 +69,7 @@ static void stop_vfs_read_hook();
  static void stop_execve_hook();
  static void stop_input_hook();
  
@@ -415,7 +317,7 @@ index c5849f90..597e65ac 100644
  static struct work_struct __maybe_unused stop_vfs_read_work;
  static struct work_struct __maybe_unused stop_execve_hook_work;
  static struct work_struct __maybe_unused stop_input_hook_work;
-@@ -136,6 +214,7 @@ void on_boot_completed(void)
+@@ -136,6 +136,7 @@ void on_boot_completed(void)
      ksu_avc_spoof_late_init();
  }
  
@@ -423,7 +325,7 @@ index c5849f90..597e65ac 100644
  #define MAX_ARG_STRINGS 0x7FFFFFFF
  struct user_arg_ptr {
  #ifdef CONFIG_COMPAT
-@@ -148,6 +227,7 @@ struct user_arg_ptr {
+@@ -148,6 +149,7 @@ struct user_arg_ptr {
  #endif
  	} ptr;
  };
@@ -431,7 +333,7 @@ index c5849f90..597e65ac 100644
  
  static const char __user *get_user_arg_ptr(struct user_arg_ptr argv, int nr)
  {
-@@ -369,6 +449,10 @@ int ksu_handle_pre_ksud(const char *filename)
+@@ -369,6 +371,10 @@ int ksu_handle_pre_ksud(const char *filename)
  	return ksu_handle_bprm_ksud(filename, argv1, envp, envp_copy_len);
  }
  
@@ -442,7 +344,7 @@ index c5849f90..597e65ac 100644
  // IMPORTANT NOTE: the call from execve_handler_pre WON'T provided correct value for envp and flags in GKI version
  int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
  				struct user_arg_ptr *argv,
-@@ -393,6 +477,15 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
+@@ -393,6 +399,15 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
  		return 0;
  	}
  
@@ -458,7 +360,7 @@ index c5849f90..597e65ac 100644
  	if (unlikely(!memcmp(filename->name, system_bin_init,
  				sizeof(system_bin_init) - 1) &&
  			argv)) {
-@@ -520,7 +613,7 @@ static ssize_t read_iter_proxy(struct kiocb *iocb, struct iov_iter *to)
+@@ -520,7 +535,7 @@ static ssize_t read_iter_proxy(struct kiocb *iocb, struct iov_iter *to)
  int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
  				size_t *count_ptr, loff_t **pos)
  {
@@ -467,7 +369,7 @@ index c5849f90..597e65ac 100644
  	if (!ksu_vfs_read_hook) {
  		return 0;
  	}
-@@ -611,8 +704,13 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
+@@ -611,8 +626,13 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
  	return 0;
  }
  
@@ -481,7 +383,7 @@ index c5849f90..597e65ac 100644
  {
  	struct file *file = fget(fd);
  	if (!file) {
-@@ -633,11 +731,12 @@ static bool is_volumedown_enough(unsigned int count)
+@@ -633,11 +653,12 @@ static bool is_volumedown_enough(unsigned int count)
  int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code,
  					int *value)
  {
@@ -495,7 +397,7 @@ index c5849f90..597e65ac 100644
  	if (*type == EV_KEY && *code == KEY_VOLUMEDOWN) {
  		int val = *value;
  		pr_info("KEY_VOLUMEDOWN val: %d\n", val);
-@@ -675,8 +774,7 @@ bool ksu_is_safe_mode()
+@@ -675,8 +696,7 @@ bool ksu_is_safe_mode()
  	return false;
  }
  
@@ -505,7 +407,7 @@ index c5849f90..597e65ac 100644
  static int sys_execve_handler_pre(struct kprobe *p, struct pt_regs *regs)
  {
  	struct pt_regs *real_regs = PT_REAL_REGS(regs);
-@@ -810,7 +908,7 @@ int __maybe_unused ksu_handle_compat_execve_ksud(
+@@ -810,7 +830,7 @@ int __maybe_unused ksu_handle_compat_execve_ksud(
  
  static void stop_vfs_read_hook()
  {
@@ -514,7 +416,7 @@ index c5849f90..597e65ac 100644
  	bool ret = schedule_work(&stop_vfs_read_work);
  	pr_info("unregister vfs_read kprobe: %d!\n", ret);
  #else
-@@ -821,7 +919,7 @@ static void stop_vfs_read_hook()
+@@ -821,7 +841,7 @@ static void stop_vfs_read_hook()
  
  static void stop_execve_hook()
  {
@@ -523,7 +425,7 @@ index c5849f90..597e65ac 100644
  	bool ret = schedule_work(&stop_execve_hook_work);
  	pr_info("unregister execve kprobe: %d!\n", ret);
  #else
-@@ -832,12 +930,13 @@ static void stop_execve_hook()
+@@ -832,12 +852,13 @@ static void stop_execve_hook()
  
  static void stop_input_hook()
  {
@@ -538,7 +440,7 @@ index c5849f90..597e65ac 100644
  	bool ret = schedule_work(&stop_input_hook_work);
  	pr_info("unregister input kprobe: %d!\n", ret);
  #else
-@@ -846,6 +945,7 @@ static void stop_input_hook()
+@@ -846,6 +867,7 @@ static void stop_input_hook()
  	}
  	ksu_input_hook = false;
  	pr_info("stop input_hook\n");
@@ -546,7 +448,7 @@ index c5849f90..597e65ac 100644
  #endif
  }
  
-@@ -853,7 +953,7 @@ static void stop_input_hook()
+@@ -853,7 +875,7 @@ static void stop_input_hook()
  // ksud: module support
  void ksu_ksud_init()
  {
@@ -555,7 +457,7 @@ index c5849f90..597e65ac 100644
  	int ret;
  
  	ret = register_kprobe(&execve_kp);
-@@ -873,10 +973,10 @@ void ksu_ksud_init()
+@@ -873,7 +895,7 @@ void ksu_ksud_init()
  
  void ksu_ksud_exit()
  {
@@ -564,11 +466,6 @@ index c5849f90..597e65ac 100644
  	unregister_kprobe(&execve_kp);
  	// this should be done before unregister vfs_read_kp
  	// unregister_kprobe(&vfs_read_kp);
- 	unregister_kprobe(&input_event_kp);
- #endif
--}
-\ No newline at end of file
-+}
 diff --git a/kernel/ksud.h b/kernel/ksud.h
 index af0ddbd1..709ba758 100644
 --- a/kernel/ksud.h
@@ -597,6 +494,18 @@ index af0ddbd1..709ba758 100644
 +#endif // #ifdef CONFIG_KSU_SUSFS
 +
  #endif
+diff --git a/kernel/seccomp_cache.h b/kernel/seccomp_cache.h
+index e3c1a31d..fd7c5a10 100644
+--- a/kernel/seccomp_cache.h
++++ b/kernel/seccomp_cache.h
+@@ -1,5 +1,5 @@
+-#ifndef __KSU_H_KERNEL_COMPAT
+-#define __KSU_H_KERNEL_COMPAT
++#ifndef __KSU_SECCOMP_CACHE_H
++#define __KSU_SECCOMP_CACHE_H
+ 
+ #include <linux/fs.h>
+ #include <linux/version.h>
 diff --git a/kernel/selinux/rules.c b/kernel/selinux/rules.c
 index 7f99b50e..ce43b71a 100644
 --- a/kernel/selinux/rules.c
@@ -1093,7 +1002,7 @@ index 1999af84..61b13376 100644
 \ No newline at end of file
 +#endif
 diff --git a/kernel/supercalls.c b/kernel/supercalls.c
-index ece8829d..2304590b 100644
+index ece8829d..9460613b 100644
 --- a/kernel/supercalls.c
 +++ b/kernel/supercalls.c
 @@ -11,6 +11,10 @@
@@ -1131,15 +1040,6 @@ index ece8829d..2304590b 100644
  		}
  		break;
  	}
-@@ -351,7 +364,7 @@ static int do_get_wrapper_fd(void __user *arg) {
- 
- static int do_manage_mark(void __user *arg)
- {
--#ifdef KSU_KPROBES_HOOK
-+#if defined(CONFIG_KSU_KPROBES_HOOK) || defined(CONFIG_KSU_SUSFS)
- 	struct ksu_manage_mark_cmd cmd;
- 	int ret = 0;
- 
 @@ -362,6 +375,7 @@ static int do_manage_mark(void __user *arg)
  
  	switch (cmd.operation) {
@@ -1214,7 +1114,15 @@ index ece8829d..2304590b 100644
  struct ksu_install_fd_tw {
  	struct callback_head cb;
  	int __user *outp;
-@@ -763,6 +803,95 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+@@ -756,13 +796,102 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+ 			  void __user **arg)
+ {
+ 	if (magic1 != KSU_INSTALL_MAGIC1)
+-		return 0;
++		return -EINVAL;
+ 
+ #ifdef CONFIG_KSU_DEBUG
+ 	pr_info("sys_reboot: intercepted call! magic: 0x%x id: %d\n", magic1,
  		magic2);
  #endif
  
