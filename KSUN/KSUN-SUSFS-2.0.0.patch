@@ -129,20 +129,10 @@ index 320aa125..64eb704f 100644
 +
  endmenu
 diff --git a/kernel/allowlist.c b/kernel/allowlist.c
-index 9c9ba6e5..70ad092c 100644
+index 9c9ba6e5..a8fbf081 100644
 --- a/kernel/allowlist.c
 +++ b/kernel/allowlist.c
-@@ -24,7 +24,9 @@
- #include "selinux/selinux.h"
- #include "allowlist.h"
- #include "manager.h"
-+#ifndef CONFIG_KSU_SUSFS
- #include "syscall_hook_manager.h"
-+#endif // #ifndef CONFIG_KSU_SUSFS
- #include "su_mount_ns.h"
- #include "kernel_compat.h"
- 
-@@ -267,7 +269,7 @@ out:
+@@ -267,7 +267,7 @@ out:
  
  	if (persist) {
  		persistent_allow_list();
@@ -152,20 +142,10 @@ index 9c9ba6e5..70ad092c 100644
  		ksu_mark_running_process();
  #endif
 diff --git a/kernel/app_profile.c b/kernel/app_profile.c
-index 213dfdbb..33b21327 100644
+index 213dfdbb..6a72b9a7 100644
 --- a/kernel/app_profile.c
 +++ b/kernel/app_profile.c
-@@ -25,7 +25,9 @@
- #include "klog.h" // IWYU pragma: keep
- #include "selinux/selinux.h"
- #include "su_mount_ns.h"
-+#ifndef CONFIG_KSU_SUSFS
- #include "syscall_hook_manager.h"
-+#endif // #ifndef CONFIG_KSU_SUSFS
- 
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
- static struct group_info root_groups = { .usage = REFCOUNT_INIT(2) };
-@@ -330,4 +332,4 @@ void escape_with_root_profile(void)
+@@ -330,4 +330,4 @@ void escape_with_root_profile(void)
  
  void escape_to_root_for_init(void) {
  	setup_selinux(KERNEL_SU_CONTEXT);
@@ -194,31 +174,22 @@ index e4d1e60c..bcfac544 100644
  	pr_info("handle umount for uid: %d, pid: %d\n", new_uid, current->pid);
  
 diff --git a/kernel/ksu.c b/kernel/ksu.c
-index 7742dad6..7a6baaa2 100644
+index 7742dad6..b6a1685b 100644
 --- a/kernel/ksu.c
 +++ b/kernel/ksu.c
-@@ -3,12 +3,20 @@
+@@ -3,6 +3,11 @@
  #include <linux/kobject.h>
  #include <linux/module.h>
  #include <linux/workqueue.h>
 +#ifdef CONFIG_KSU_SUSFS
 +#include <linux/susfs.h>
++#include "setuid_hook.h"
++#include "sucompat.h"
 +#endif // #ifdef CONFIG_KSU_SUSFS
  
  #include "allowlist.h"
  #include "feature.h"
- #include "klog.h" // IWYU pragma: keep
- #include "throne_tracker.h"
-+#ifndef CONFIG_KSU_SUSFS
- #include "syscall_hook_manager.h"
-+#else
-+#include "setuid_hook.h"
-+#include "sucompat.h"
-+#endif // #ifndef CONFIG_KSU_SUSFS
- #include "ksud.h"
- #include "supercalls.h"
- #include "ksu.h"
-@@ -19,6 +27,7 @@ struct cred* ksu_cred;
+@@ -19,6 +24,7 @@ struct cred* ksu_cred;
  extern void __init ksu_lsm_hook_init(void);
  extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
  					void *argv, void *envp, int *flags);
@@ -226,7 +197,7 @@ index 7742dad6..7a6baaa2 100644
  extern int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
  				    void *argv, void *envp, int *flags);
  int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-@@ -28,6 +37,7 @@ int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
+@@ -28,6 +34,7 @@ int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
  	return ksu_handle_execveat_sucompat(fd, filename_ptr, argv, envp,
  					    flags);
  }
@@ -234,7 +205,7 @@ index 7742dad6..7a6baaa2 100644
  
  int __init kernelsu_init(void)
  {
-@@ -50,7 +60,12 @@ int __init kernelsu_init(void)
+@@ -50,7 +57,12 @@ int __init kernelsu_init(void)
  
  	ksu_supercalls_init();
  
@@ -247,7 +218,7 @@ index 7742dad6..7a6baaa2 100644
  
  	ksu_lsm_hook_init();
  
-@@ -58,7 +73,13 @@ int __init kernelsu_init(void)
+@@ -58,7 +70,13 @@ int __init kernelsu_init(void)
  
  	ksu_throne_tracker_init();
  
@@ -261,7 +232,7 @@ index 7742dad6..7a6baaa2 100644
  
  	ksu_file_wrapper_init();
  
-@@ -79,9 +100,11 @@ void kernelsu_exit(void)
+@@ -79,9 +97,11 @@ void kernelsu_exit(void)
  
  	ksu_observer_exit();
  
@@ -615,7 +586,7 @@ index 750d4f49..6bb68528 100644
 +
  #endif
 diff --git a/kernel/setuid_hook.c b/kernel/setuid_hook.c
-index 69a47bbe..08151567 100644
+index 69a47bbe..0809f073 100644
 --- a/kernel/setuid_hook.c
 +++ b/kernel/setuid_hook.c
 @@ -16,6 +16,10 @@
@@ -629,13 +600,8 @@ index 69a47bbe..08151567 100644
  #include "allowlist.h"
  #include "setuid_hook.h"
  #include "feature.h"
-@@ -24,9 +28,33 @@
- #include "selinux/selinux.h"
- #include "seccomp_cache.h"
- #include "supercalls.h"
-+#ifndef CONFIG_KSU_SUSFS
+@@ -27,6 +31,28 @@
  #include "syscall_hook_manager.h"
-+#endif // #ifndef CONFIG_KSU_SUSFS
  #include "kernel_umount.h"
  
 +#ifdef CONFIG_KSU_SUSFS
@@ -663,7 +629,7 @@ index 69a47bbe..08151567 100644
  static bool ksu_enhanced_security_enabled = false;
  
  static int enhanced_security_feature_get(u64 *value)
-@@ -66,6 +94,7 @@ static void ksu_install_manager_fd_tw_func(struct callback_head *cb)
+@@ -66,6 +92,7 @@ static void ksu_install_manager_fd_tw_func(struct callback_head *cb)
      kfree(cb);
  }
  
@@ -671,7 +637,7 @@ index 69a47bbe..08151567 100644
  int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
  {
      // we rely on the fact that zygote always call setresuid(3) with same uids
-@@ -143,6 +172,110 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
+@@ -143,6 +170,110 @@ int ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)
  
      return 0;
  }
@@ -782,7 +748,7 @@ index 69a47bbe..08151567 100644
  
  extern void ksu_lsm_hook_init(void);
  void ksu_setuid_hook_init(void)
-@@ -158,4 +291,4 @@ void ksu_setuid_hook_exit(void)
+@@ -158,4 +289,4 @@ void ksu_setuid_hook_exit(void)
      pr_info("ksu_core_exit\n");
      ksu_kernel_umount_exit();
      ksu_unregister_feature_handler(KSU_FEATURE_ENHANCED_SECURITY);
@@ -1013,7 +979,7 @@ index 1999af84..61b13376 100644
 \ No newline at end of file
 +#endif
 diff --git a/kernel/supercalls.c b/kernel/supercalls.c
-index ece8829d..171a3b87 100644
+index ece8829d..2dacb193 100644
 --- a/kernel/supercalls.c
 +++ b/kernel/supercalls.c
 @@ -11,6 +11,10 @@
@@ -1027,21 +993,18 @@ index ece8829d..171a3b87 100644
  
  #include "supercalls.h"
  #include "arch.h"
-@@ -24,7 +28,13 @@
- #include "manager.h"
- #include "selinux/selinux.h"
+@@ -26,6 +30,10 @@
  #include "file_wrapper.h"
-+#ifndef CONFIG_KSU_SUSFS
  #include "syscall_hook_manager.h"
-+#endif // #ifndef CONFIG_KSU_SUSFS
-+
+ 
 +#ifdef CONFIG_KSU_SUSFS
 +bool susfs_is_boot_completed_triggered __read_mostly = false;
 +#endif // #ifdef CONFIG_KSU_SUSFS
- 
++
  #include "tiny_sulog.c"
  
-@@ -112,6 +122,9 @@ static int do_report_event(void __user *arg)
+ // Permission check functions
+@@ -112,6 +120,9 @@ static int do_report_event(void __user *arg)
  			boot_complete_lock = true;
  			pr_info("boot_complete triggered\n");
  			on_boot_completed();
@@ -1051,7 +1014,7 @@ index ece8829d..171a3b87 100644
  		}
  		break;
  	}
-@@ -351,7 +364,7 @@ static int do_get_wrapper_fd(void __user *arg) {
+@@ -351,7 +362,7 @@ static int do_get_wrapper_fd(void __user *arg) {
  
  static int do_manage_mark(void __user *arg)
  {
@@ -1060,7 +1023,7 @@ index ece8829d..171a3b87 100644
  	struct ksu_manage_mark_cmd cmd;
  	int ret = 0;
  
-@@ -362,6 +375,7 @@ static int do_manage_mark(void __user *arg)
+@@ -362,6 +373,7 @@ static int do_manage_mark(void __user *arg)
  
  	switch (cmd.operation) {
  	case KSU_MARK_GET: {
@@ -1068,7 +1031,7 @@ index ece8829d..171a3b87 100644
  		// Get task mark status
  		ret = ksu_get_task_mark(cmd.pid);
  		if (ret < 0) {
-@@ -370,8 +384,19 @@ static int do_manage_mark(void __user *arg)
+@@ -370,8 +382,19 @@ static int do_manage_mark(void __user *arg)
  		}
  		cmd.result = (u32)ret;
  		break;
@@ -1088,7 +1051,7 @@ index ece8829d..171a3b87 100644
  		if (cmd.pid == 0) {
  			ksu_mark_all_process();
  		} else {
-@@ -382,9 +407,15 @@ static int do_manage_mark(void __user *arg)
+@@ -382,9 +405,15 @@ static int do_manage_mark(void __user *arg)
  				return ret;
  			}
  		}
@@ -1104,7 +1067,7 @@ index ece8829d..171a3b87 100644
  		if (cmd.pid == 0) {
  			ksu_unmark_all_process();
  		} else {
-@@ -395,11 +426,20 @@ static int do_manage_mark(void __user *arg)
+@@ -395,11 +424,20 @@ static int do_manage_mark(void __user *arg)
  				return ret;
  			}
  		}
@@ -1125,7 +1088,7 @@ index ece8829d..171a3b87 100644
  		break;
  	}
  	default: {
-@@ -670,7 +710,7 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
+@@ -670,7 +708,7 @@ static const struct ksu_ioctl_cmd_map ksu_ioctl_handlers[] = {
  	{ .cmd = 0, .name = NULL, .handler = NULL, .perm_check = NULL } // Sentinel
  };
  
@@ -1134,7 +1097,7 @@ index ece8829d..171a3b87 100644
  struct ksu_install_fd_tw {
  	struct callback_head cb;
  	int __user *outp;
-@@ -806,6 +846,96 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
+@@ -806,6 +844,96 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
  		return 0;
  	}
  
@@ -1231,7 +1194,7 @@ index ece8829d..171a3b87 100644
  	return 0;
  }
  #endif
-@@ -819,7 +949,7 @@ void ksu_supercalls_init(void)
+@@ -819,7 +947,7 @@ void ksu_supercalls_init(void)
  		pr_info("  %-18s = 0x%08x\n", ksu_ioctl_handlers[i].name, ksu_ioctl_handlers[i].cmd);
  	}
  
@@ -1240,7 +1203,7 @@ index ece8829d..171a3b87 100644
  	int rc = register_kprobe(&reboot_kp);
  	if (rc) {
  		pr_err("reboot kprobe failed: %d\n", rc);
-@@ -830,7 +960,7 @@ void ksu_supercalls_init(void)
+@@ -830,7 +958,7 @@ void ksu_supercalls_init(void)
  }
  
  void ksu_supercalls_exit(void){
