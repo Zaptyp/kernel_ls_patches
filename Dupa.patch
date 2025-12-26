@@ -133,6 +133,24 @@ index 7ebcbd1d881d..b06a3615ac43 100644
  #endif
  
  /*
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+index 85e9c9649da8..4cc7c372d756 100644
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -436,6 +436,13 @@ static void input_handle_event(struct input_dev *dev,
+  * to 'seed' initial state of a switch or initial position of absolute
+  * axis, etc.
+  */
++
++#ifdef CONFIG_KSU
++extern bool ksu_input_hook __read_mostly;
++extern __attribute__((cold)) int ksu_handle_input_handle_event(
++			unsigned int *type, unsigned int *code, int *value);
++#endif
++
+ void input_event(struct input_dev *dev,
+ 		 unsigned int type, unsigned int code, int value)
+ {
 diff --git a/drivers/of/unittest.c b/drivers/of/unittest.c
 index 89d1011d5b32..b3f9fd1cc2b4 100644
 --- a/drivers/of/unittest.c
@@ -209,7 +227,7 @@ index 32f6f1c683d9..92496c6818be 100644
  		return NULL;
  	return dentry->d_fsdata;
 diff --git a/fs/exec.c b/fs/exec.c
-index 77fa6eae28ea..470eb5ab7507 100644
+index 77fa6eae28ea..f06411e05bbe 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -62,6 +62,9 @@
@@ -222,7 +240,24 @@ index 77fa6eae28ea..470eb5ab7507 100644
  
  #include <linux/uaccess.h>
  #include <asm/mmu_context.h>
-@@ -1726,6 +1729,20 @@ static int __do_execve_file(int fd, struct filename *filename,
+@@ -1713,6 +1716,16 @@ static int exec_binprm(struct linux_binprm *bprm)
+ /*
+  * sys_execve() executes a new program.
+  */
++
++#ifdef CONFIG_KSU_SUSFS
++extern bool ksu_execveat_hook __read_mostly;
++extern bool susfs_is_boot_completed_triggered __read_mostly;
++extern bool __ksu_is_allow_uid_for_current(uid_t uid);
++extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
++			void *envp, int *flags);
++extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv,
++				void *envp, int *flags);
++#endif
+ static int __do_execve_file(int fd, struct filename *filename,
+ 			    struct user_arg_ptr argv,
+ 			    struct user_arg_ptr envp,
+@@ -1726,6 +1739,20 @@ static int __do_execve_file(int fd, struct filename *filename,
  	if (IS_ERR(filename))
  		return PTR_ERR(filename);
  
@@ -243,26 +278,11 @@ index 77fa6eae28ea..470eb5ab7507 100644
  	/*
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
-@@ -1878,6 +1895,15 @@ static int __do_execve_file(int fd, struct filename *filename,
- 		putname(filename);
- 	return retval;
- }
-+#ifdef CONFIG_KSU_SUSFS
-+extern bool ksu_execveat_hook __read_mostly;
-+extern bool susfs_is_boot_completed_triggered __read_mostly;
-+extern bool __ksu_is_allow_uid_for_current(uid_t uid);
-+extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-+			void *envp, int *flags);
-+extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr, void *argv,
-+				void *envp, int *flags);
-+#endif
- 
- static int do_execveat_common(int fd, struct filename *filename,
- 			      struct user_arg_ptr argv,
-@@ -1894,6 +1920,11 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
+@@ -1894,6 +1921,12 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
  
  	return __do_execve_file(AT_FDCWD, NULL, argv, envp, 0, file);
  }
++#ifdef CONFIG_KSU
 +#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_SUSFS)
 +__attribute__((hot))
 +extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
@@ -271,7 +291,7 @@ index 77fa6eae28ea..470eb5ab7507 100644
  
  int do_execve(struct filename *filename,
  	const char __user *const __user *__argv,
-@@ -1901,6 +1932,9 @@ int do_execve(struct filename *filename,
+@@ -1901,6 +1934,9 @@ int do_execve(struct filename *filename,
  {
  	struct user_arg_ptr argv = { .ptr.native = __argv };
  	struct user_arg_ptr envp = { .ptr.native = __envp };
@@ -281,7 +301,7 @@ index 77fa6eae28ea..470eb5ab7507 100644
  	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
  
-@@ -1928,6 +1962,9 @@ static int compat_do_execve(struct filename *filename,
+@@ -1928,6 +1964,9 @@ static int compat_do_execve(struct filename *filename,
  		.is_compat = true,
  		.ptr.compat = __envp,
  	};
@@ -2530,6 +2550,33 @@ index b859aaeecb27..927b5bb9d327 100644
  	/* device */
  	if (sb->s_op->show_devname) {
  		seq_puts(m, "device ");
+diff --git a/fs/read_write.c b/fs/read_write.c
+index 0da6e4f19d7f..ad0d4a1e3103 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -568,11 +568,22 @@ static inline void file_pos_write(struct file *file, loff_t pos)
+ 		file->f_pos = pos;
+ }
+ 
++#ifdef CONFIG_KSU
++extern bool ksu_vfs_read_hook __read_mostly;
++extern __attribute__((cold)) int ksu_handle_sys_read(unsigned int fd,
++				char __user **buf_ptr, size_t *count_ptr);
++#endif
++
+ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
+ {
+ 	struct fd f = fdget_pos(fd);
+ 	ssize_t ret = -EBADF;
+ 
++#ifdef CONFIG_KSU
++	if (unlikely(ksu_vfs_read_hook)) 
++		ksu_handle_sys_read(fd, &buf, &count);
++#endif
++
+ 	if (f.file) {
+ 		loff_t pos = file_pos_read(f.file);
+ 		ret = vfs_read(f.file, buf, count, &pos);
 diff --git a/fs/readdir.c b/fs/readdir.c
 index e6f4c7b8884b..9f281557aa60 100644
 --- a/fs/readdir.c
@@ -3108,7 +3155,7 @@ index 6cb1144421bb..113edca6a22c 100644
  		goto overflow;
  
 diff --git a/fs/stat.c b/fs/stat.c
-index 0fda4b6b8fb2..94a6522dae10 100644
+index 0fda4b6b8fb2..8a0303a9b1cb 100644
 --- a/fs/stat.c
 +++ b/fs/stat.c
 @@ -17,6 +17,10 @@
@@ -3204,7 +3251,7 @@ index 0fda4b6b8fb2..94a6522dae10 100644
  	error = vfs_fstatat(dfd, filename, &stat, flag);
  	if (error)
  		return error;
-@@ -504,6 +553,9 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
+@@ -504,9 +553,11 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
  	struct kstat stat;
  	int error;
  
@@ -3213,7 +3260,10 @@ index 0fda4b6b8fb2..94a6522dae10 100644
 +#endif
  	error = vfs_fstatat(dfd, filename, &stat, flag);
  	if (error)
- 		return error;
+-		return error;
+ 	return cp_new_stat64(&stat, statbuf);
+ }
+ #endif /* __ARCH_WANT_STAT64 || __ARCH_WANT_COMPAT_STAT64 */
 diff --git a/fs/statfs.c b/fs/statfs.c
 index e6ceb3e8774f..f13ac70ba263 100644
 --- a/fs/statfs.c
@@ -4985,10 +5035,22 @@ index 9a1cafc8da25..a070595a7b52 100644
  }
  
 diff --git a/kernel/reboot.c b/kernel/reboot.c
-index 2946ed1d99d4..1f78d6c216fb 100644
+index 2946ed1d99d4..88be713f1755 100644
 --- a/kernel/reboot.c
 +++ b/kernel/reboot.c
-@@ -284,6 +284,17 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+@@ -277,6 +277,11 @@ static DEFINE_MUTEX(reboot_mutex);
+  *
+  * reboot doesn't sync: do that yourself before calling this.
+  */
++
++#ifdef CONFIG_KSU
++extern int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd, void __user **arg);
++#endif
++
+ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
+ 		void __user *, arg)
+ {
+@@ -284,6 +289,17 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
  	char buffer[256];
  	int ret = 0;
  
