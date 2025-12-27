@@ -227,7 +227,7 @@ index 32f6f1c683d9..92496c6818be 100644
  		return NULL;
  	return dentry->d_fsdata;
 diff --git a/fs/exec.c b/fs/exec.c
-index 77fa6eae28ea..f06411e05bbe 100644
+index 77fa6eae28ea..f4beb3c8f632 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -62,6 +62,9 @@
@@ -278,11 +278,10 @@ index 77fa6eae28ea..f06411e05bbe 100644
  	/*
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
-@@ -1894,6 +1921,12 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
+@@ -1894,6 +1921,11 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
  
  	return __do_execve_file(AT_FDCWD, NULL, argv, envp, 0, file);
  }
-+#ifdef CONFIG_KSU
 +#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_SUSFS)
 +__attribute__((hot))
 +extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
@@ -291,7 +290,7 @@ index 77fa6eae28ea..f06411e05bbe 100644
  
  int do_execve(struct filename *filename,
  	const char __user *const __user *__argv,
-@@ -1901,6 +1934,9 @@ int do_execve(struct filename *filename,
+@@ -1901,6 +1933,9 @@ int do_execve(struct filename *filename,
  {
  	struct user_arg_ptr argv = { .ptr.native = __argv };
  	struct user_arg_ptr envp = { .ptr.native = __envp };
@@ -301,7 +300,7 @@ index 77fa6eae28ea..f06411e05bbe 100644
  	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
  
-@@ -1928,6 +1964,9 @@ static int compat_do_execve(struct filename *filename,
+@@ -1928,6 +1963,9 @@ static int compat_do_execve(struct filename *filename,
  		.is_compat = true,
  		.ptr.compat = __envp,
  	};
