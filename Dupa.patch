@@ -178,7 +178,7 @@ index 3bbe62a1e19b..6abe4e7fb202 100644
 +# in order to use the data as readahead args
 +#
 +# byungchul.park@lge.com 20120503
-+obj-y += sreadahead_prof.o
++#obj-y += sreadahead_prof.o
 +# LGE_CHANGE_E
 +
 +
