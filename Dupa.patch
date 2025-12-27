@@ -151,15 +151,27 @@ index 85e9c9649da8..4cc7c372d756 100644
  void input_event(struct input_dev *dev,
  		 unsigned int type, unsigned int code, int value)
  {
+diff --git a/drivers/of/unittest.c b/drivers/of/unittest.c
+index 89d1011d5b32..b3f9fd1cc2b4 100644
+--- a/drivers/of/unittest.c
++++ b/drivers/of/unittest.c
+@@ -287,7 +287,7 @@ static void __init of_unittest_printf(void)
+ 		return;
+ 	}
+ 
+-	num_to_str(phandle_str, sizeof(phandle_str), np->phandle);
++	num_to_str(phandle_str, sizeof(phandle_str), np->phandle, 0);
+ 
+ 	of_unittest_printf_one(np, "%pOF",  full_name);
+ 	of_unittest_printf_one(np, "%pOFf", full_name);
 diff --git a/fs/Makefile b/fs/Makefile
-index 3bbe62a1e19b..898a1fb981d4 100644
+index 3bbe62a1e19b..c9d9eef6b184 100644
 --- a/fs/Makefile
 +++ b/fs/Makefile
-@@ -14,6 +14,9 @@ obj-y :=	open.o read_write.o file_table.o super.o \
+@@ -14,6 +14,8 @@ obj-y :=	open.o read_write.o file_table.o super.o \
  		pnode.o splice.o sync.o utimes.o \
  		stack.o fs_struct.o statfs.o fs_pin.o nsfs.o
  
-+
 +obj-$(CONFIG_KSU_SUSFS) += susfs.o
 +
  ifeq ($(CONFIG_BLOCK),y)
@@ -205,7 +217,7 @@ index 32f6f1c683d9..92496c6818be 100644
  		return NULL;
  	return dentry->d_fsdata;
 diff --git a/fs/exec.c b/fs/exec.c
-index 77fa6eae28ea..b4255b383520 100644
+index 77fa6eae28ea..1625431e5cf6 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -62,6 +62,9 @@
@@ -218,10 +230,11 @@ index 77fa6eae28ea..b4255b383520 100644
  
  #include <linux/uaccess.h>
  #include <asm/mmu_context.h>
-@@ -1713,6 +1716,16 @@ static int exec_binprm(struct linux_binprm *bprm)
+@@ -1713,6 +1716,17 @@ static int exec_binprm(struct linux_binprm *bprm)
  /*
   * sys_execve() executes a new program.
   */
++
 +#ifdef CONFIG_KSU_SUSFS
 +extern bool ksu_execveat_hook __read_mostly;
 +extern bool susfs_is_boot_completed_triggered __read_mostly;
@@ -235,7 +248,7 @@ index 77fa6eae28ea..b4255b383520 100644
  static int __do_execve_file(int fd, struct filename *filename,
  			    struct user_arg_ptr argv,
  			    struct user_arg_ptr envp,
-@@ -1726,6 +1739,20 @@ static int __do_execve_file(int fd, struct filename *filename,
+@@ -1726,6 +1740,20 @@ static int __do_execve_file(int fd, struct filename *filename,
  	if (IS_ERR(filename))
  		return PTR_ERR(filename);
  
@@ -256,10 +269,11 @@ index 77fa6eae28ea..b4255b383520 100644
  	/*
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
-@@ -1894,6 +1921,11 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
+@@ -1894,6 +1922,12 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
  
  	return __do_execve_file(AT_FDCWD, NULL, argv, envp, 0, file);
  }
++#ifdef CONFIG_KSU
 +#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_SUSFS)
 +__attribute__((hot))
 +extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
@@ -268,7 +282,7 @@ index 77fa6eae28ea..b4255b383520 100644
  
  int do_execve(struct filename *filename,
  	const char __user *const __user *__argv,
-@@ -1901,6 +1933,9 @@ int do_execve(struct filename *filename,
+@@ -1901,6 +1935,9 @@ int do_execve(struct filename *filename,
  {
  	struct user_arg_ptr argv = { .ptr.native = __argv };
  	struct user_arg_ptr envp = { .ptr.native = __envp };
@@ -278,7 +292,7 @@ index 77fa6eae28ea..b4255b383520 100644
  	return do_execveat_common(AT_FDCWD, filename, argv, envp, 0);
  }
  
-@@ -1928,6 +1963,9 @@ static int compat_do_execve(struct filename *filename,
+@@ -1928,6 +1965,9 @@ static int compat_do_execve(struct filename *filename,
  		.is_compat = true,
  		.ptr.compat = __envp,
  	};
@@ -1544,11 +1558,37 @@ index 6df8e2a33a2f..b30466f277bf 100644
  extern const struct file_operations proc_clear_refs_operations;
  extern const struct file_operations proc_pagemap_operations;
  
+diff --git a/fs/proc/meminfo.c b/fs/proc/meminfo.c
+index 585651de1f5b..91920067ca73 100644
+--- a/fs/proc/meminfo.c
++++ b/fs/proc/meminfo.c
+@@ -26,20 +26,7 @@ void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
+ 
+ static void show_val_kb(struct seq_file *m, const char *s, unsigned long num)
+ {
+-	char v[32];
+-	static const char blanks[7] = {' ', ' ', ' ', ' ',' ', ' ', ' '};
+-	int len;
+-
+-	len = num_to_str(v, sizeof(v), num << (PAGE_SHIFT - 10));
+-
+-	seq_write(m, s, 16);
+-
+-	if (len > 0) {
+-		if (len < 8)
+-			seq_write(m, blanks, 8 - len);
+-
+-		seq_write(m, v, len);
+-	}
++	seq_put_decimal_ull_width(m, s, num << (PAGE_SHIFT - 10), 8);
+ 	seq_write(m, " kB\n", 4);
+ }
+ 
 diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
-index f5c0fc7badc2..f6fcc327c35b 100644
+index f5c0fc7badc2..12f220fb2fd3 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
-@@ -20,12 +20,20 @@
+@@ -20,15 +20,25 @@
  #include <linux/uaccess.h>
  #include <linux/mm_inline.h>
  #include <linux/ctype.h>
@@ -1566,10 +1606,78 @@ index f5c0fc7badc2..f6fcc327c35b 100644
 +extern void susfs_sus_ino_for_show_map_vma(unsigned long ino, dev_t *out_dev, unsigned long *out_ino);
 +#endif
 +
++#define SEQ_PUT_DEC(str, val) \
++		seq_put_decimal_ull_width(m, str, (val) << (PAGE_SHIFT-10), 8)
  void task_mem(struct seq_file *m, struct mm_struct *mm)
  {
- 	unsigned long text, lib, swap, anon, file, shmem;
-@@ -302,7 +310,6 @@ static int proc_map_release(struct inode *inode, struct file *file)
+-	unsigned long text, lib, swap, anon, file, shmem;
++	unsigned long text, lib, swap, ptes, pmds, anon, file, shmem;
+ 	unsigned long hiwater_vm, total_vm, hiwater_rss, total_rss;
+ 
+ 	anon = get_mm_counter(mm, MM_ANONPAGES);
+@@ -52,37 +62,32 @@ void task_mem(struct seq_file *m, struct mm_struct *mm)
+ 	text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK)) >> 10;
+ 	lib = (mm->exec_vm << (PAGE_SHIFT-10)) - text;
+ 	swap = get_mm_counter(mm, MM_SWAPENTS);
+-	seq_printf(m,
+-		"VmPeak:\t%8lu kB\n"
+-		"VmSize:\t%8lu kB\n"
+-		"VmLck:\t%8lu kB\n"
+-		"VmPin:\t%8lu kB\n"
+-		"VmHWM:\t%8lu kB\n"
+-		"VmRSS:\t%8lu kB\n"
+-		"RssAnon:\t%8lu kB\n"
+-		"RssFile:\t%8lu kB\n"
+-		"RssShmem:\t%8lu kB\n"
+-		"VmData:\t%8lu kB\n"
+-		"VmStk:\t%8lu kB\n"
+-		"VmExe:\t%8lu kB\n"
+-		"VmLib:\t%8lu kB\n"
+-		"VmPTE:\t%8lu kB\n"
+-		"VmSwap:\t%8lu kB\n",
+-		hiwater_vm << (PAGE_SHIFT-10),
+-		total_vm << (PAGE_SHIFT-10),
+-		mm->locked_vm << (PAGE_SHIFT-10),
+-		mm->pinned_vm << (PAGE_SHIFT-10),
+-		hiwater_rss << (PAGE_SHIFT-10),
+-		total_rss << (PAGE_SHIFT-10),
+-		anon << (PAGE_SHIFT-10),
+-		file << (PAGE_SHIFT-10),
+-		shmem << (PAGE_SHIFT-10),
+-		mm->data_vm << (PAGE_SHIFT-10),
+-		mm->stack_vm << (PAGE_SHIFT-10), text, lib,
+-		mm_pgtables_bytes(mm) >> 10,
+-		swap << (PAGE_SHIFT-10));
++	ptes = PTRS_PER_PTE * sizeof(pte_t) * atomic_long_read(&mm->nr_ptes);
++	pmds = PTRS_PER_PMD * sizeof(pmd_t) * mm_nr_pmds(mm);
++	SEQ_PUT_DEC("VmPeak:\t", hiwater_vm);
++	SEQ_PUT_DEC(" kB\nVmSize:\t", total_vm);
++	SEQ_PUT_DEC(" kB\nVmLck:\t", mm->locked_vm);
++	SEQ_PUT_DEC(" kB\nVmPin:\t", mm->pinned_vm);
++	SEQ_PUT_DEC(" kB\nVmHWM:\t", hiwater_rss);
++	SEQ_PUT_DEC(" kB\nVmRSS:\t", total_rss);
++	SEQ_PUT_DEC(" kB\nRssAnon:\t", anon);
++	SEQ_PUT_DEC(" kB\nRssFile:\t", file);
++	SEQ_PUT_DEC(" kB\nRssShmem:\t", shmem);
++	SEQ_PUT_DEC(" kB\nVmData:\t", mm->data_vm);
++	SEQ_PUT_DEC(" kB\nVmStk:\t", mm->stack_vm);
++	seq_put_decimal_ull_width(m,
++		    " kB\nVmExe:\t", text >> 10, 8);
++	seq_put_decimal_ull_width(m,
++		    " kB\nVmLib:\t", lib >> 10, 8);
++	seq_put_decimal_ull_width(m,
++		    " kB\nVmPTE:\t", ptes >> 10, 8);
++	seq_put_decimal_ull_width(m,
++		    " kB\nVmPMD:\t", pmds >> 10, 8);
++	SEQ_PUT_DEC(" kB\nVmSwap:\t", swap);
++	seq_puts(m, " kB\n");
+ 	hugetlb_report_usage(m, mm);
+ }
++#undef SEQ_PUT_DEC
+ 
+ unsigned long task_vsize(struct mm_struct *mm)
+ {
+@@ -302,7 +307,6 @@ static int proc_map_release(struct inode *inode, struct file *file)
  	if (priv->mm)
  		mmdrop(priv->mm);
  
@@ -1577,7 +1685,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  	return seq_release_private(inode, file);
  }
  
-@@ -334,19 +341,22 @@ static void show_vma_header_prefix(struct seq_file *m,
+@@ -334,19 +338,22 @@ static void show_vma_header_prefix(struct seq_file *m,
  				   dev_t dev, unsigned long ino)
  {
  	seq_setwidth(m, 25 + sizeof(void *) * 6 - 1);
@@ -1610,7 +1718,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  {
  	struct mm_struct *mm = vma->vm_mm;
  	struct file *file = vma->vm_file;
-@@ -359,8 +369,35 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
+@@ -359,8 +366,35 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
  
  	if (file) {
  		struct inode *inode = file_inode(vma->vm_file);
@@ -1646,7 +1754,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
  	}
  
-@@ -416,35 +453,18 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
+@@ -416,35 +450,18 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
  	seq_putc(m, '\n');
  }
  
@@ -1685,7 +1793,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  };
  
  static int pid_maps_open(struct inode *inode, struct file *file)
-@@ -452,11 +472,6 @@ static int pid_maps_open(struct inode *inode, struct file *file)
+@@ -452,11 +469,6 @@ static int pid_maps_open(struct inode *inode, struct file *file)
  	return do_maps_open(inode, file, &proc_pid_maps_op);
  }
  
@@ -1697,7 +1805,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  const struct file_operations proc_pid_maps_operations = {
  	.open		= pid_maps_open,
  	.read		= seq_read,
-@@ -464,13 +479,6 @@ const struct file_operations proc_pid_maps_operations = {
+@@ -464,13 +476,6 @@ const struct file_operations proc_pid_maps_operations = {
  	.release	= proc_map_release,
  };
  
@@ -1711,7 +1819,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  /*
   * Proportional Set Size(PSS): my share of RSS.
   *
-@@ -492,7 +500,6 @@ const struct file_operations proc_tid_maps_operations = {
+@@ -492,7 +497,6 @@ const struct file_operations proc_tid_maps_operations = {
  
  #ifdef CONFIG_PROC_PAGE_MONITOR
  struct mem_size_stats {
@@ -1719,7 +1827,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  	unsigned long resident;
  	unsigned long shared_clean;
  	unsigned long shared_dirty;
-@@ -506,19 +513,54 @@ struct mem_size_stats {
+@@ -506,19 +510,54 @@ struct mem_size_stats {
  	unsigned long swap;
  	unsigned long shared_hugetlb;
  	unsigned long private_hugetlb;
@@ -1775,7 +1883,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  	if (PageAnon(page)) {
  		mss->anonymous += size;
  		if (!PageSwapBacked(page) && !dirty && !PageDirty(page))
-@@ -531,42 +573,25 @@ static void smaps_account(struct mem_size_stats *mss, struct page *page,
+@@ -531,42 +570,25 @@ static void smaps_account(struct mem_size_stats *mss, struct page *page,
  		mss->referenced += size;
  
  	/*
@@ -1828,10 +1936,14 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  	}
  }
  
-@@ -799,12 +824,9 @@ void __weak arch_show_smap(struct seq_file *m, struct vm_area_struct *vma)
- {
+@@ -795,16 +817,9 @@ static int smaps_hugetlb_range(pte_t *pte, unsigned long hmask,
  }
+ #endif /* HUGETLB_PAGE */
  
+-void __weak arch_show_smap(struct seq_file *m, struct vm_area_struct *vma)
+-{
+-}
+-
 -static int show_smap(struct seq_file *m, void *v, int is_pid)
 +static void smap_gather_stats(struct vm_area_struct *vma,
 +			     struct mem_size_stats *mss)
@@ -1843,7 +1955,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  	struct mm_walk smaps_walk = {
  		.pmd_entry = smaps_pte_range,
  #ifdef CONFIG_HUGETLB_PAGE
-@@ -812,23 +834,6 @@ static int show_smap(struct seq_file *m, void *v, int is_pid)
+@@ -812,23 +827,6 @@ static int show_smap(struct seq_file *m, void *v, int is_pid)
  #endif
  		.mm = vma->vm_mm,
  	};
@@ -1867,7 +1979,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  
  	smaps_walk.private = mss;
  
-@@ -859,104 +864,169 @@ static int show_smap(struct seq_file *m, void *v, int is_pid)
+@@ -859,104 +857,170 @@ static int show_smap(struct seq_file *m, void *v, int is_pid)
  #endif
  	/* mmap_sem is held in m_start */
  	walk_page_vma(vma, &smaps_walk);
@@ -1921,7 +2033,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
 +	SEQ_PUT_DEC(" kB\nShmemPmdMapped: ", mss->shmem_thp);
 +	SEQ_PUT_DEC(" kB\nShared_Hugetlb: ", mss->shared_hugetlb);
 +	seq_put_decimal_ull_width(m, " kB\nPrivate_Hugetlb: ",
-+			  mss->private_hugetlb >> 10, 7);
++				  mss->private_hugetlb >> 10, 7);
 +	SEQ_PUT_DEC(" kB\nSwap:           ", mss->swap);
 +	SEQ_PUT_DEC(" kB\nSwapPss:        ",
 +					mss->swap_pss >> PSS_SHIFT);
@@ -1955,9 +2067,9 @@ index f5c0fc7badc2..f6fcc327c35b 100644
 +		goto bypass_orig_flow;
 +	}
 +#endif
- 
-+	smap_gather_stats(vma, &mss);
 +
++	smap_gather_stats(vma, &mss);
+ 
 +	show_map_vma(m, vma);
  	if (vma_get_anon_name(vma)) {
  		seq_puts(m, "Name:           ");
@@ -2023,8 +2135,8 @@ index f5c0fc7badc2..f6fcc327c35b 100644
 +
 +	if (arch_pkeys_enabled())
 +		seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
-+	arch_show_smap(m, vma);
 +	show_smap_vma_flags(m, vma);
++
 +#ifdef CONFIG_KSU_SUSFS_SUS_MAP
 +bypass_orig_flow:
 +#endif
@@ -2098,6 +2210,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
 +
 +	return ret;
  }
++#undef SEQ_PUT_DEC
  
  static const struct seq_operations proc_pid_smaps_op = {
  	.start	= m_start,
@@ -2115,7 +2228,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  };
  
  static int pid_smaps_open(struct inode *inode, struct file *file)
-@@ -964,28 +1034,45 @@ static int pid_smaps_open(struct inode *inode, struct file *file)
+@@ -964,28 +1028,45 @@ static int pid_smaps_open(struct inode *inode, struct file *file)
  	return do_maps_open(inode, file, &proc_pid_smaps_op);
  }
  
@@ -2175,7 +2288,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  }
  
  const struct file_operations proc_pid_smaps_operations = {
-@@ -996,17 +1083,10 @@ const struct file_operations proc_pid_smaps_operations = {
+@@ -996,17 +1077,10 @@ const struct file_operations proc_pid_smaps_operations = {
  };
  
  const struct file_operations proc_pid_smaps_rollup_operations = {
@@ -2195,7 +2308,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  };
  
  enum clear_refs_types {
-@@ -1565,6 +1645,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1565,6 +1639,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	unsigned long start_vaddr;
  	unsigned long end_vaddr;
  	int ret = 0, copied = 0;
@@ -2205,7 +2318,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  
  	if (!mm || !mmget_not_zero(mm))
  		goto out;
-@@ -1623,6 +1706,16 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1623,6 +1700,16 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  		down_read(&mm->mmap_sem);
  		ret = walk_page_range(start_vaddr, end, &pagemap_walk);
  		up_read(&mm->mmap_sem);
@@ -2222,7 +2335,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  		start_vaddr = end;
  
  		len = min(count, PM_ENTRY_BYTES * pm.pos);
-@@ -2080,7 +2173,7 @@ static int gather_hugetlb_stats(pte_t *pte, unsigned long hmask,
+@@ -2080,7 +2167,7 @@ static int gather_hugetlb_stats(pte_t *pte, unsigned long hmask,
  /*
   * Display pages allocated per node and memory policy via /proc.
   */
@@ -2231,7 +2344,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  {
  	struct numa_maps_private *numa_priv = m->private;
  	struct proc_maps_private *proc_priv = &numa_priv->proc_maps;
-@@ -2164,45 +2257,17 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
+@@ -2164,45 +2251,17 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
  	return 0;
  }
  
@@ -2250,16 +2363,16 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  	.next   = m_next,
  	.stop   = m_stop,
 -	.show   = show_pid_numa_map,
--};
--
++	.show   = show_numa_map,
+ };
+ 
 -static const struct seq_operations proc_tid_numa_maps_op = {
 -	.start  = m_start,
 -	.next   = m_next,
 -	.stop   = m_stop,
 -	.show   = show_tid_numa_map,
-+	.show   = show_numa_map,
- };
- 
+-};
+-
 -static int numa_maps_open(struct inode *inode, struct file *file,
 -			  const struct seq_operations *ops)
 -{
@@ -2280,7 +2393,7 @@ index f5c0fc7badc2..f6fcc327c35b 100644
  }
  
  const struct file_operations proc_pid_numa_maps_operations = {
-@@ -2212,10 +2277,4 @@ const struct file_operations proc_pid_numa_maps_operations = {
+@@ -2212,10 +2271,4 @@ const struct file_operations proc_pid_numa_maps_operations = {
  	.release	= proc_map_release,
  };
  
@@ -2917,11 +3030,65 @@ index e6f4c7b8884b..9f281557aa60 100644
  	error = iterate_dir(f.file, &buf.ctx);
  	if (error >= 0)
 diff --git a/fs/seq_file.c b/fs/seq_file.c
-index 6cb1144421bb..f380ab643a96 100644
+index 6cb1144421bb..113edca6a22c 100644
 --- a/fs/seq_file.c
 +++ b/fs/seq_file.c
-@@ -718,6 +718,52 @@ void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
+@@ -676,15 +676,20 @@ void seq_puts(struct seq_file *m, const char *s)
  }
+ EXPORT_SYMBOL(seq_puts);
+ 
+-/*
++/**
+  * A helper routine for putting decimal numbers without rich format of printf().
+  * only 'unsigned long long' is supported.
+- * This routine will put strlen(delimiter) + number into seq_file.
++ * @m: seq_file identifying the buffer to which data should be written
++ * @delimiter: a string which is printed before the number
++ * @num: the number
++ * @width: a minimum field width
++ *
++ * This routine will put strlen(delimiter) + number into seq_filed.
+  * This routine is very quick when you show lots of numbers.
+  * In usual cases, it will be better to use seq_printf(). It's easier to read.
+  */
+-void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
+-			 unsigned long long num)
++void seq_put_decimal_ull_width(struct seq_file *m, const char *delimiter,
++			 unsigned long long num, unsigned int width)
+ {
+ 	int len;
+ 
+@@ -698,7 +703,10 @@ void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
+ 	memcpy(m->buf + m->count, delimiter, len);
+ 	m->count += len;
+ 
+-	if (m->count + 1 >= m->size)
++	if (!width)
++		width = 1;
++
++	if (m->count + width >= m->size)
+ 		goto overflow;
+ 
+ 	if (num < 10) {
+@@ -706,7 +714,7 @@ void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
+ 		return;
+ 	}
+ 
+-	len = num_to_str(m->buf + m->count, m->size - m->count, num);
++	len = num_to_str(m->buf + m->count, m->size - m->count, num, width);
+ 	if (!len)
+ 		goto overflow;
+ 
+@@ -716,8 +724,60 @@ void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
+ overflow:
+ 	seq_set_overflow(m);
+ }
++
++void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
++			 unsigned long long num)
++{
++	return seq_put_decimal_ull_width(m, delimiter, num, 0);
++}
  EXPORT_SYMBOL(seq_put_decimal_ull);
  
 +/**
@@ -2973,6 +3140,15 @@ index 6cb1144421bb..f380ab643a96 100644
  void seq_put_decimal_ll(struct seq_file *m, const char *delimiter, long long num)
  {
  	int len;
+@@ -745,7 +805,7 @@ void seq_put_decimal_ll(struct seq_file *m, const char *delimiter, long long num
+ 		return;
+ 	}
+ 
+-	len = num_to_str(m->buf + m->count, m->size - m->count, num);
++	len = num_to_str(m->buf + m->count, m->size - m->count, num, 0);
+ 	if (!len)
+ 		goto overflow;
+ 
 diff --git a/fs/stat.c b/fs/stat.c
 index 0fda4b6b8fb2..8a0303a9b1cb 100644
 --- a/fs/stat.c
@@ -4369,6 +4545,20 @@ index f93490a61131..05cb521ea8eb 100644
  /**
   * ida_get_new - allocate new ID
   * @ida:	idr handle
+diff --git a/include/linux/kernel.h b/include/linux/kernel.h
+index 1f9ccba60fdc..d84422f57d87 100644
+--- a/include/linux/kernel.h
++++ b/include/linux/kernel.h
+@@ -451,7 +451,8 @@ extern long simple_strtol(const char *,char **,unsigned int);
+ extern unsigned long long simple_strtoull(const char *,char **,unsigned int);
+ extern long long simple_strtoll(const char *,char **,unsigned int);
+ 
+-extern int num_to_str(char *buf, int size, unsigned long long num);
++extern int num_to_str(char *buf, int size,
++		      unsigned long long num, unsigned int width);
+ 
+ /* lib/printf utilities */
+ 
 diff --git a/include/linux/mount.h b/include/linux/mount.h
 index 1ff21c19b0b9..99adc5d71846 100644
 --- a/include/linux/mount.h
@@ -4427,28 +4617,20 @@ index 936d550a1820..056563fff87d 100644
  
  	/* CPU-specific state of this task: */
 diff --git a/include/linux/seq_file.h b/include/linux/seq_file.h
-index ab437dd2e3b9..6cb24df5347d 100644
+index ab437dd2e3b9..23d6a92cea9f 100644
 --- a/include/linux/seq_file.h
 +++ b/include/linux/seq_file.h
-@@ -121,6 +121,22 @@ void seq_puts(struct seq_file *m, const char *s);
+@@ -118,9 +118,14 @@ __printf(2, 3)
+ void seq_printf(struct seq_file *m, const char *fmt, ...);
+ void seq_putc(struct seq_file *m, char c);
+ void seq_puts(struct seq_file *m, const char *s);
++void seq_put_decimal_ull_width(struct seq_file *m, const char *delimiter,
++			       unsigned long long num, unsigned int width);
  void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
  			 unsigned long long num);
  void seq_put_decimal_ll(struct seq_file *m, const char *delimiter, long long num);
 +void seq_put_hex_ll(struct seq_file *m, const char *delimiter,
 +		    unsigned long long v, unsigned int width);
-+
-+static inline void seq_put_decimal_ull_width(struct seq_file *m,
-+		 const char *delimiter,
-+		 unsigned long long num,
-+		 unsigned int width)
-+{
-+	if (delimiter)
-+		seq_puts(m, delimiter);
-+	if (width)
-+		seq_printf(m, "%*llu", width, num);
-+	else
-+		seq_printf(m, "%llu", num);
-+}
 +
  void seq_escape(struct seq_file *m, const char *s, const char *esc);
  
@@ -5105,6 +5287,44 @@ index 7f063ec93d52..de823aac11d4 100644
  }
 -EXPORT_SYMBOL(ida_simple_remove);
 +EXPORT_SYMBOL(ida_free);
+diff --git a/lib/vsprintf.c b/lib/vsprintf.c
+index 7c6a8d6b777a..98d16aa10662 100644
+--- a/lib/vsprintf.c
++++ b/lib/vsprintf.c
+@@ -362,7 +362,7 @@ char *put_dec(char *buf, unsigned long long n)
+  *
+  * If speed is not important, use snprintf(). It's easy to read the code.
+  */
+-int num_to_str(char *buf, int size, unsigned long long num)
++int num_to_str(char *buf, int size, unsigned long long num, unsigned int width)
+ {
+ 	/* put_dec requires 2-byte alignment of the buffer. */
+ 	char tmp[sizeof(num) * 3] __aligned(2);
+@@ -376,11 +376,21 @@ int num_to_str(char *buf, int size, unsigned long long num)
+ 		len = put_dec(tmp, num) - tmp;
+ 	}
+ 
+-	if (len > size)
++	if (len > size || width > size)
+ 		return 0;
++
++	if (width > len) {
++		width = width - len;
++		for (idx = 0; idx < width; idx++)
++			buf[idx] = ' ';
++	} else {
++		width = 0;
++	}
++
+ 	for (idx = 0; idx < len; ++idx)
+-		buf[idx] = tmp[len - idx - 1];
+-	return len;
++		buf[idx + width] = tmp[len - idx - 1];
++
++	return len + width;
+ }
+ 
+ #define SIGN	1		/* unsigned/signed, must be 1 */
 diff --git a/security/selinux/avc.c b/security/selinux/avc.c
 index 1b8f957c2b5f..1bb43d00a421 100644
 --- a/security/selinux/avc.c
