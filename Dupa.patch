@@ -1545,7 +1545,7 @@ index 6df8e2a33a2f..b30466f277bf 100644
  extern const struct file_operations proc_pagemap_operations;
  
 diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
-index f5c0fc7badc2..85a1fe49d5bd 100644
+index f5c0fc7badc2..f6fcc327c35b 100644
 --- a/fs/proc/task_mmu.c
 +++ b/fs/proc/task_mmu.c
 @@ -20,12 +20,20 @@
@@ -1867,7 +1867,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  
  	smaps_walk.private = mss;
  
-@@ -859,104 +864,173 @@ static int show_smap(struct seq_file *m, void *v, int is_pid)
+@@ -859,104 +864,169 @@ static int show_smap(struct seq_file *m, void *v, int is_pid)
  #endif
  	/* mmap_sem is held in m_start */
  	walk_page_vma(vma, &smaps_walk);
@@ -1921,7 +1921,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
 +	SEQ_PUT_DEC(" kB\nShmemPmdMapped: ", mss->shmem_thp);
 +	SEQ_PUT_DEC(" kB\nShared_Hugetlb: ", mss->shared_hugetlb);
 +	seq_put_decimal_ull_width(m, " kB\nPrivate_Hugetlb: ",
-+				  mss->private_hugetlb >> 10, 7);
++			  mss->private_hugetlb >> 10, 7);
 +	SEQ_PUT_DEC(" kB\nSwap:           ", mss->swap);
 +	SEQ_PUT_DEC(" kB\nSwapPss:        ",
 +					mss->swap_pss >> PSS_SHIFT);
@@ -1955,9 +1955,9 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
 +		goto bypass_orig_flow;
 +	}
 +#endif
-+
-+	smap_gather_stats(vma, &mss);
  
++	smap_gather_stats(vma, &mss);
++
 +	show_map_vma(m, vma);
  	if (vma_get_anon_name(vma)) {
  		seq_puts(m, "Name:           ");
@@ -2009,6 +2009,11 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
 -			   mss->swap >> 10,
 -			   (unsigned long)(mss->swap_pss >> (10 + PSS_SHIFT)),
 -			   (unsigned long)(mss->pss_locked >> (10 + PSS_SHIFT)));
+-
+-	if (!rollup_mode) {
+-		arch_show_smap(m, vma);
+-		show_smap_vma_flags(m, vma);
+-	}
 +	SEQ_PUT_DEC("Size:           ", vma->vm_end - vma->vm_start);
 +	SEQ_PUT_DEC(" kB\nKernelPageSize: ", vma_kernel_pagesize(vma));
 +	SEQ_PUT_DEC(" kB\nMMUPageSize:    ", vma_mmu_pagesize(vma));
@@ -2018,12 +2023,8 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
 +
 +	if (arch_pkeys_enabled())
 +		seq_printf(m, "ProtectionKey:  %8u\n", vma_pkey(vma));
++	arch_show_smap(m, vma);
 +	show_smap_vma_flags(m, vma);
- 
- 	if (!rollup_mode) {
- 		arch_show_smap(m, vma);
- 		show_smap_vma_flags(m, vma);
- 	}
 +#ifdef CONFIG_KSU_SUSFS_SUS_MAP
 +bypass_orig_flow:
 +#endif
@@ -2114,7 +2115,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  };
  
  static int pid_smaps_open(struct inode *inode, struct file *file)
-@@ -964,28 +1038,45 @@ static int pid_smaps_open(struct inode *inode, struct file *file)
+@@ -964,28 +1034,45 @@ static int pid_smaps_open(struct inode *inode, struct file *file)
  	return do_maps_open(inode, file, &proc_pid_smaps_op);
  }
  
@@ -2174,7 +2175,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  }
  
  const struct file_operations proc_pid_smaps_operations = {
-@@ -996,17 +1087,10 @@ const struct file_operations proc_pid_smaps_operations = {
+@@ -996,17 +1083,10 @@ const struct file_operations proc_pid_smaps_operations = {
  };
  
  const struct file_operations proc_pid_smaps_rollup_operations = {
@@ -2194,7 +2195,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  };
  
  enum clear_refs_types {
-@@ -1565,6 +1649,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1565,6 +1645,9 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  	unsigned long start_vaddr;
  	unsigned long end_vaddr;
  	int ret = 0, copied = 0;
@@ -2204,7 +2205,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  
  	if (!mm || !mmget_not_zero(mm))
  		goto out;
-@@ -1623,6 +1710,16 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
+@@ -1623,6 +1706,16 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
  		down_read(&mm->mmap_sem);
  		ret = walk_page_range(start_vaddr, end, &pagemap_walk);
  		up_read(&mm->mmap_sem);
@@ -2221,7 +2222,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  		start_vaddr = end;
  
  		len = min(count, PM_ENTRY_BYTES * pm.pos);
-@@ -2080,7 +2177,7 @@ static int gather_hugetlb_stats(pte_t *pte, unsigned long hmask,
+@@ -2080,7 +2173,7 @@ static int gather_hugetlb_stats(pte_t *pte, unsigned long hmask,
  /*
   * Display pages allocated per node and memory policy via /proc.
   */
@@ -2230,7 +2231,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  {
  	struct numa_maps_private *numa_priv = m->private;
  	struct proc_maps_private *proc_priv = &numa_priv->proc_maps;
-@@ -2164,45 +2261,17 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
+@@ -2164,45 +2257,17 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
  	return 0;
  }
  
@@ -2279,7 +2280,7 @@ index f5c0fc7badc2..85a1fe49d5bd 100644
  }
  
  const struct file_operations proc_pid_numa_maps_operations = {
-@@ -2212,10 +2281,4 @@ const struct file_operations proc_pid_numa_maps_operations = {
+@@ -2212,10 +2277,4 @@ const struct file_operations proc_pid_numa_maps_operations = {
  	.release	= proc_map_release,
  };
  
@@ -4426,15 +4427,28 @@ index 936d550a1820..056563fff87d 100644
  
  	/* CPU-specific state of this task: */
 diff --git a/include/linux/seq_file.h b/include/linux/seq_file.h
-index ab437dd2e3b9..599e145f4917 100644
+index ab437dd2e3b9..6cb24df5347d 100644
 --- a/include/linux/seq_file.h
 +++ b/include/linux/seq_file.h
-@@ -121,6 +121,9 @@ void seq_puts(struct seq_file *m, const char *s);
+@@ -121,6 +121,22 @@ void seq_puts(struct seq_file *m, const char *s);
  void seq_put_decimal_ull(struct seq_file *m, const char *delimiter,
  			 unsigned long long num);
  void seq_put_decimal_ll(struct seq_file *m, const char *delimiter, long long num);
 +void seq_put_hex_ll(struct seq_file *m, const char *delimiter,
 +		    unsigned long long v, unsigned int width);
++
++static inline void seq_put_decimal_ull_width(struct seq_file *m,
++		 const char *delimiter,
++		 unsigned long long num,
++		 unsigned int width)
++{
++	if (delimiter)
++		seq_puts(m, delimiter);
++	if (width)
++		seq_printf(m, "%*llu", width, num);
++	else
++		seq_printf(m, "%llu", num);
++}
 +
  void seq_escape(struct seq_file *m, const char *s, const char *esc);
  
