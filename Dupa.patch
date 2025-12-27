@@ -217,7 +217,7 @@ index 32f6f1c683d9..92496c6818be 100644
  		return NULL;
  	return dentry->d_fsdata;
 diff --git a/fs/exec.c b/fs/exec.c
-index 77fa6eae28ea..1625431e5cf6 100644
+index 77fa6eae28ea..d03f7e3f3258 100644
 --- a/fs/exec.c
 +++ b/fs/exec.c
 @@ -62,6 +62,9 @@
@@ -269,20 +269,19 @@ index 77fa6eae28ea..1625431e5cf6 100644
  	/*
  	 * We move the actual failure in case of RLIMIT_NPROC excess from
  	 * set*uid() to execve() because too many poorly written programs
-@@ -1894,6 +1922,12 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
- 
+@@ -1895,12 +1923,21 @@ int do_execve_file(struct file *file, void *__argv, void *__envp)
  	return __do_execve_file(AT_FDCWD, NULL, argv, envp, 0, file);
  }
-+#ifdef CONFIG_KSU
+ 
 +#if defined(CONFIG_KSU) && !defined(CONFIG_KSU_SUSFS)
 +__attribute__((hot))
 +extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr,
 +				void *argv, void *envp, int *flags);
 +#endif
- 
++
  int do_execve(struct filename *filename,
  	const char __user *const __user *__argv,
-@@ -1901,6 +1935,9 @@ int do_execve(struct filename *filename,
+ 	const char __user *const __user *__envp)
  {
  	struct user_arg_ptr argv = { .ptr.native = __argv };
  	struct user_arg_ptr envp = { .ptr.native = __envp };
